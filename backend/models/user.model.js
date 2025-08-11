@@ -17,6 +17,10 @@ const userSchema = mongoose.Schema({
   password: { type: String, required: true},
   status: { type: String, required: true, default: "inactive" },
   progress: { type: Number, default: 0 },
+  verificationCode: { type: String },
+  verificationExpires: {Date: Date },
+  isVerified: { type: Boolean, default: false },
+
 });
 
 

@@ -8,7 +8,6 @@ const nodemailer = require("nodemailer");
 // Register a new user
 const userSignup = async (req, res) => {
   const { username, email, password } = req.body;
-  console.log(req.body);
 
   if (!username || !email || !password) {
     return res.status(400).json({ message: "All fields are required" });
@@ -21,15 +20,18 @@ const userSignup = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const emailToken = jwt.sign({ email }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
+
+    // Generate verification code and expiry
+   const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+    const verificationExpires = new Date(Date.now() + 10 * 60 * 1000); 
 
     const newUser = new userModel({
       username,
       email,
       password: hashedPassword,
-      verificationToken: emailToken,
+      verificationCode,
+      verificationExpires,
+      isVerified: false,
     });
 
     const transporter = nodemailer.createTransport({
@@ -41,153 +43,145 @@ const userSignup = async (req, res) => {
     });
 
     await transporter.sendMail({
-      from: '"SignSync" <MovicDev>',
+      from: '"SignSync" <no-reply@signsync.com>',
       to: email,
       subject: "Verify your email",
-      html: ` <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9;">
-    <div style="max-width: 600px; margin: auto; background-color: #ffffff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);">
-      <h2 style="color: #333333;">Email Verification</h2>
-      <p style="color: #555555; font-size: 16px; line-height:1.45">
-        Thank you for signing up. <br>
-To complete yout registration, please verity your email address by clicking the button below.
-      </p>
-      <a href="http://172.20.10.2:3000/verifyEmail?token=${emailToken}"
-         style="display: inline-block; padding: 12px 24px; margin-top: 20px; background-color: #000; color: white; text-decoration: none; border-radius: 4px; font-size: 16px;">
-         Verify Email
-      </a>
-      <p style="color: #999999; font-size: 14px; margin-top: 30px;">
-        If you did not request this, you can safely ignore this email.
-      </p>
-    </div>
-  </div>`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9;">
+          <div style="max-width: 600px; margin: auto; background-color: #ffffff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);">
+            <h2 style="color: #333333;">Email Verification Code</h2>
+            <p style="color: #555555; font-size: 16px;">
+              Hello ${username},<br><br>
+              Your verification code is: <strong style="font-size: 24px;">${verificationCode}</strong><br><br>
+              This code will expire in 10 minutes.
+            </p>
+          </div>
+        </div>`,
     });
 
     await newUser.save();
-    res.status(201).json({ message: "Please check your email to verify your account" });
-    console.log("Verification email sent successfully"); 
+    res.status(201).json({ message: "Verification code sent to your email" });
   } catch (err) {
-    res.status(500).json({ message: "Internal server error", error: err.message });
     console.error("Signup Error:", err);
+    res.status(500).json({ message: "Internal server error", error: err.message });
   }
 };
 
-// Email Verification
-const verifyEmail = async (req, res) => {
-  const { token } = req.query;
-  if (!token) {
-    return res.status(400).send("Verification token is missing.");
+// Verify Code Controller
+const verifyCode = async (req, res) => {
+  const { email, code } = req.body;
+
+  if (!email || !code) {
+    return res.status(400).json({ message: "Email and code are required" });
   }
+
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await userModel.findOne({ email: decoded.email });
-    if (!user) return res.status(404).send("User not found");
-    if (user.isVerified) return res.send("Email already verified.");
+    const user = await userModel.findOne({ email });
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.isVerified) return res.status(200).json({ message: "User already verified" });
+
+    if (user.verificationCode !== code) {
+      return res.status(400).json({ message: "Invalid verification code" });
+    }
+
+    if (new Date() > user.verificationExpires) {
+      return res.status(400).json({ message: "Verification code expired" });
+    }
 
     user.isVerified = true;
+    user.verificationCode = undefined;
+    user.verificationExpires = undefined;
     await user.save();
-    res.send("Email verified! You can now log in.");
-  } catch (err) {
-    console.error(err);
-    res.status(400).send("Invalid or expired token");
+
+    res.status(200).json({ message: "Email verified successfully" });
+  } catch (error) {
+    console.error("Verification error:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Login a user Route
-
+// Login a user
 const userSignin = (req, res) => {
   const { email, password } = req.body;
+
   if (!email || !password) {
     return res.status(400).json({ message: "All fields are required" });
-  } else {
-    userModel
-      .findOne({ email })
-      .then((user) => {
-        if (!user) {
-          res.status(400).json({ message: "User not found" });
-        } else if (user.isVerified === false)
-          return res
-            .status(403)
-            .json({ message: "Please verify your email first" });
-        else {
-          bcrypt
-            .compare(password, user.password)
-            .then((isMatch) => {
-              if (isMatch === true) {
-                const token = jwt.sign({ email }, process.env.JWT_SECRET, {
-                  expiresIn: "24h",
-                });
-                res.status(200).json({
-                  message: "User logged in successfully",
-                  token,
-                  status: 200,
-                });
-              } else {
-                res.status(400).json({ message: "Invalid password" });
-              }
-            })
-            .catch((err) => {
-              res.status(500).json({ message: "Internal server error", err });
-            });
-        }
-      })
-      .catch((err) => {
-        res.status(500).json({ message: "Internal server error", err });
-      });
   }
+
+  userModel
+    .findOne({ email })
+    .then((user) => {
+      if (!user) {
+        return res.status(400).json({ message: "User not found" });
+      }
+
+      if (user.isVerified === false) {
+        return res.status(403).json({ message: "Please verify your email first" });
+      }
+
+      bcrypt.compare(password, user.password).then((isMatch) => {
+        if (isMatch) {
+          const token = jwt.sign({ email }, process.env.JWT_SECRET, {
+            expiresIn: "24h",
+          });
+
+          res.status(200).json({
+            message: "User logged in successfully",
+            token,
+            status: 200,
+          });
+        } else {
+          res.status(400).json({ message: "Invalid password" });
+        }
+      });
+    })
+    .catch((err) => {
+      console.error("Login error:", err);
+      res.status(500).json({ message: "Internal server error", err });
+    });
 };
 
-// Verify token Route
-// const tokenVerification = (req, res) => {
-//   const token = req.headers.authorization.split(" ")[1];
-//   if (!token) {
-//     return res.status(401).json({ message: "Unauthorized" });
-//   } else {
-//     jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-//       if (err) {
-//         return res.status(401).json({ message: "Unauthorized" });
-//       } else {
-//         res.status(200).json({ message: "Token is valid", decoded });
-//       }
-//     });
-//   }
-// };
+// Middleware to verify token
 const tokenVerification = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ success: false, message: "Token required" });
     }
 
-    const token = authHeader.split(' ')[1];
+    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     req.user = { id: decoded.id, email: decoded.email };
     next();
   } catch (error) {
     let message = "Invalid token";
-    if (error.name === 'TokenExpiredError') message = "Token expired";
+    if (error.name === "TokenExpiredError") message = "Token expired";
     return res.status(401).json({ success: false, message });
   }
 };
 
-// Dashboard endpoint to get user info
+// Dashboard endpoint
 const getDashboard = async (req, res) => {
   try {
-    const user = await userModel.findOne({ email: req.user.email }).select('-password -verificationToken');
-    
+    const user = await userModel
+      .findOne({ email: req.user.email })
+      .select("-password -verificationCode -verificationExpires");
+
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       user: {
         id: user._id,
         username: user.username,
         email: user.email,
         status: user.status,
-        progress: user.progress
-      }
+        progress: user.progress,
+      },
     });
   } catch (error) {
     console.error("Dashboard error:", error);
@@ -195,5 +189,10 @@ const getDashboard = async (req, res) => {
   }
 };
 
-module.exports = { userSignup, userSignin, tokenVerification, verifyEmail, getDashboard };
-
+module.exports = {
+  userSignup,
+  userSignin,
+  verifyCode,
+  tokenVerification,
+  getDashboard,
+};
