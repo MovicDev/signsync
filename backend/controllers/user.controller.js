@@ -189,10 +189,99 @@ const getDashboard = async (req, res) => {
   }
 };
 
+// Get user profile
+const getProfile = async (req, res) => {
+  try {
+    const user = await userModel.findById(req.user.id).select('-password -verificationCode -verificationExpires');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Update user profile
+const updateProfile = async (req, res) => {
+  const { fullName, username, email, bio } = req.body;
+  const updates = {};
+  
+  if (fullName) updates.fullName = fullName;
+  if (username) updates.username = username;
+  if (email) updates.email = email;
+  if (bio) updates.bio = bio;
+
+  try {
+    // Check if email is being updated and if it's already taken
+    if (email) {
+      const existingUser = await userModel.findOne({ email });
+      if (existingUser && existingUser._id.toString() !== req.user.id) {
+        return res.status(400).json({ message: 'Email already in use' });
+      }
+    }
+
+    // Check if username is being updated and if it's already taken
+    if (username) {
+      const existingUser = await userModel.findOne({ username });
+      if (existingUser && existingUser._id.toString() !== req.user.id) {
+        return res.status(400).json({ message: 'Username already taken' });
+      }
+    }
+
+    const user = await userModel.findByIdAndUpdate(
+      req.user.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('-password -verificationCode -verificationExpires');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ message: 'Profile updated successfully', user });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Update profile picture
+const updateProfilePicture = async (req, res) => {
+  try {
+    // In a real app, you would upload the image to a storage service like AWS S3
+    // and save the URL to the database
+    const { imageUrl } = req.body;
+    
+    if (!imageUrl) {
+      return res.status(400).json({ message: 'Image URL is required' });
+    }
+
+    const user = await userModel.findByIdAndUpdate(
+      req.user.id,
+      { $set: { profilePicture: imageUrl } },
+      { new: true }
+    ).select('-password -verificationCode -verificationExpires');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ message: 'Profile picture updated successfully', user });
+  } catch (error) {
+    console.error('Error updating profile picture:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   userSignup,
   userSignin,
   verifyCode,
   tokenVerification,
   getDashboard,
+  getProfile,
+  updateProfile,
+  updateProfilePicture
 };
