@@ -93,7 +93,7 @@ const Home = () => {
             </View>
           </TouchableOpacity>
 
-          {/* <TouchableOpacity 
+          <TouchableOpacity 
             style={styles.videoUpload}
             onPress={() => router.push("/(pages)/sign-language-video")}
           >
@@ -107,7 +107,7 @@ const Home = () => {
               <Text style={styles.buttonText}> Video</Text>
               <Text style={styles.subText}>Process Video for Words & Sentences</Text>
             </View>
-          </TouchableOpacity> */}
+          </TouchableOpacity>
         </View>
 
         <View style={styles.recentActivity}>
